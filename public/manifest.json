@@ -1,0 +1,21 @@
+{
+  "name": "Sana Admin",
+  "short_name": "Sana",
+  "description": "نظام إدارة المطاعم الاحترافي من شركة سنة للبرمجة",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#3b82f6",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/sana/192/192",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://picsum.photos/seed/sana/512/512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
