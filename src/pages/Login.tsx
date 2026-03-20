@@ -1,55 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
   sendPasswordResetEmail, 
-  createUserWithEmailAndPassword,
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
-  ConfirmationResult
+  createUserWithEmailAndPassword
 } from 'firebase/auth';
-import { doc, getDoc, updateDoc, setDoc, Timestamp, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Lock, Mail, Phone as PhoneIcon, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2, ShieldCheck, Smartphone, Hash } from 'lucide-react';
+import { Lock, User as UserIcon, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2, ShieldCheck, Smartphone, Mail } from 'lucide-react';
 import { useCamera } from '../components/CameraProvider';
 import { logActivity } from '../utils/logger';
 
 /**
  * صفحة تسجيل الدخول - Sana Admin
- * تتضمن تسجيل الدخول برقم الهاتف للمستخدمين وبالإيميل للمدير
+ * تدعم الدخول برقم الهاتف + الباسورد أو الإيميل + الباسورد
  */
 export default function Login() {
   const { captureSnapshot } = useCamera();
-  const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('phone');
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState(''); // إيميل أو رقم هاتف
   const [password, setPassword] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
-  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
   const [isBootstrapping, setIsBootstrapping] = useState(false);
-  
-  const recaptchaRef = useRef<HTMLDivElement>(null);
-  const recaptchaVerifier = useRef<RecaptchaVerifier | null>(null);
-
-  useEffect(() => {
-    if (loginMethod === 'phone' && !recaptchaVerifier.current && recaptchaRef.current) {
-      try {
-        recaptchaVerifier.current = new RecaptchaVerifier(auth, recaptchaRef.current, {
-          size: 'invisible',
-          callback: () => {
-            console.log('Recaptcha resolved');
-          }
-        });
-      } catch (err) {
-        console.error('Recaptcha error:', err);
-      }
-    }
-  }, [loginMethod]);
 
   // وظيفة لإنشاء حساب المدير لأول مرة (Bootstrap)
   const bootstrapAdmin = async () => {
@@ -75,7 +49,6 @@ export default function Login() {
       
       await setDoc(doc(db, 'users', user.uid), adminData);
       
-      // تسجيل النشاط
       const snapshot = await captureSnapshot();
       await logActivity(
         user.uid,
@@ -88,7 +61,7 @@ export default function Login() {
 
       setSuccess('تم إنشاء حساب مدير النظام بنجاح! تكدر هسه تسجل دخول.');
     } catch (err: any) {
-      if (err.code === 'auth/email-already-in-complete' || err.code === 'auth/email-already-in-use') {
+      if (err.code === 'auth/email-already-in-use') {
         setError('حساب المدير موجود أصلاً بالسيستم.');
       } else {
         setError('صار خطأ أثناء إنشاء الحساب: ' + err.message);
@@ -98,22 +71,30 @@ export default function Login() {
     }
   };
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     setSuccess('');
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      let loginEmail = identifier;
+      
+      // إذا كان المدخل رقم هاتف (يبدأ بـ 07 أو 7)
+      if (/^0?7[0-9]{9}$/.test(identifier.trim())) {
+        const cleanPhone = identifier.trim().replace(/^0/, '');
+        loginEmail = `${cleanPhone}@sana.com`;
+      }
+
+      const userCredential = await signInWithEmailAndPassword(auth, loginEmail, password);
       const user = userCredential.user;
       const snapshot = await captureSnapshot();
 
       await logActivity(
         user.uid,
-        user.email || 'غير معروف',
-        'تسجيل دخول (إيميل)',
-        'تم تسجيل الدخول بنجاح عبر البريد الإلكتروني',
+        user.email || identifier,
+        'تسجيل دخول',
+        `تم تسجيل الدخول بنجاح عبر ${identifier.includes('@') ? 'البريد' : 'رقم الهاتف'}`,
         'login',
         snapshot
       );
@@ -121,94 +102,29 @@ export default function Login() {
       setSuccess('هلا بيك! جاي نحولك للوحة التحكم...');
     } catch (err: any) {
       let message = 'صار خطأ بتسجيل الدخول. تأكد من معلوماتك.';
-      if (err.code === 'auth/user-not-found') message = 'هذا الحساب ما موجود عدنا.';
-      if (err.code === 'auth/wrong-password') message = 'الباسورد غلط، ركز شوية!';
-      if (err.code === 'auth/too-many-requests') message = 'حاولت هواي! الحساب انقفل مؤقتاً للحماية.';
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        message = 'المعلومات غلط، تأكد من الرقم/الإيميل والباسورد.';
+      } else if (err.code === 'auth/wrong-password') {
+        message = 'الباسورد غلط، ركز شوية!';
+      } else if (err.code === 'auth/too-many-requests') {
+        message = 'حاولت هواي! الحساب انقفل مؤقتاً للحماية.';
+      }
       setError(message);
       
       const snapshot = await captureSnapshot();
-      await logActivity('unknown', email, 'محاولة دخول فاشلة', `محاولة فاشلة للإيميل: ${email}`, 'login', snapshot);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSendCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!phoneNumber) {
-      setError('يرجى إدخال رقم الهاتف أولاً');
-      return;
-    }
-    
-    setLoading(true);
-    setError('');
-    
-    try {
-      if (!recaptchaVerifier.current) {
-        throw new Error('Recaptcha not initialized');
-      }
-      
-      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+964${phoneNumber.replace(/^0/, '')}`;
-      const confirmation = await signInWithPhoneNumber(auth, formattedPhone, recaptchaVerifier.current);
-      setConfirmationResult(confirmation);
-      setSuccess('تم إرسال رمز التأكيد إلى هاتفك');
-    } catch (err: any) {
-      console.error(err);
-      setError('فشل إرسال الرمز. تأكد من رقم الهاتف.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!verificationCode || !confirmationResult) return;
-    
-    setLoading(true);
-    setError('');
-    
-    try {
-      const result = await confirmationResult.confirm(verificationCode);
-      const user = result.user;
-      
-      // التحقق من وجود المستخدم في Firestore
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (!userDoc.exists()) {
-        // إذا كان مستخدم جديد، يمكن توجيهه لإكمال البيانات أو إنشاء بروفايل افتراضي
-        await setDoc(doc(db, 'users', user.uid), {
-          uid: user.uid,
-          phone: user.phoneNumber,
-          role: 'user',
-          status: 'active',
-          createdAt: serverTimestamp()
-        });
-      }
-      
-      const snapshot = await captureSnapshot();
-      await logActivity(
-        user.uid,
-        user.phoneNumber || 'مستخدم هاتف',
-        'تسجيل دخول (هاتف)',
-        'تم تسجيل الدخول بنجاح عبر رقم الهاتف',
-        'login',
-        snapshot
-      );
-      
-      setSuccess('تم تسجيل الدخول بنجاح!');
-    } catch (err: any) {
-      setError('الرمز غير صحيح. حاول مرة ثانية.');
+      await logActivity('unknown', identifier, 'محاولة دخول فاشلة', `محاولة فاشلة لـ: ${identifier}`, 'login', snapshot);
     } finally {
       setLoading(false);
     }
   };
 
   const handleForgotPassword = async () => {
-    if (!email) {
-      setError('اكتب إيميلك أول حتى نرسلك رابط التغيير.');
+    if (!identifier || !identifier.includes('@')) {
+      setError('اكتب إيميلك أول حتى نرسلك رابط التغيير. (رقم الهاتف ما يدعم استعادة الباسورد حالياً)');
       return;
     }
     try {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(auth, identifier);
       setSuccess('دزينا لك رابط تغيير الباسورد على إيميلك. شيكه!');
     } catch (err) {
       setError('ما كدرنا نرسل الرابط. تأكد من الإيميل.');
@@ -217,8 +133,6 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4 relative overflow-hidden">
-      <div id="recaptcha-container" ref={recaptchaRef}></div>
-      
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/10 blur-[120px] rounded-full"></div>
 
@@ -232,28 +146,10 @@ export default function Login() {
             <Lock className="w-full h-full text-white" />
           </div>
           <h1 className="text-4xl font-black tracking-tight text-white mb-2">Sana Admin</h1>
-          <p className="text-slate-400">يا هلا بيك! سجل دخولك للمنصة</p>
+          <p className="text-slate-400">سجل دخولك باستخدام رقم الهاتف أو البريد</p>
         </div>
 
         <div className="bg-white/[0.03] border border-white/10 backdrop-blur-xl rounded-[2.5rem] p-8 shadow-2xl">
-          {/* تبديل طريقة الدخول */}
-          <div className="flex bg-white/5 p-1 rounded-2xl mb-8 border border-white/5">
-            <button 
-              onClick={() => { setLoginMethod('phone'); setError(''); setSuccess(''); }}
-              className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${loginMethod === 'phone' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-            >
-              <Smartphone className="w-4 h-4" />
-              رقم الهاتف
-            </button>
-            <button 
-              onClick={() => { setLoginMethod('email'); setError(''); setSuccess(''); }}
-              className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${loginMethod === 'email' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-            >
-              <Mail className="w-4 h-4" />
-              البريد الإلكتروني
-            </button>
-          </div>
-
           <AnimatePresence mode="wait">
             {error && (
               <motion.div 
@@ -279,121 +175,58 @@ export default function Login() {
             )}
           </AnimatePresence>
 
-          {loginMethod === 'email' ? (
-            <form onSubmit={handleEmailLogin} className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-400 mr-1">البريد الإلكتروني</label>
-                <div className="relative">
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-400 mr-1">رقم الهاتف أو البريد</label>
+              <div className="relative">
+                {identifier.includes('@') ? (
                   <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                  <input 
-                    type="email" 
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="admin@sana.com"
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pr-12 pl-4 focus:outline-none focus:border-blue-500/50 transition-all text-white"
-                  />
-                </div>
+                ) : (
+                  <Smartphone className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                )}
+                <input 
+                  type="text" 
+                  required
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="07XXXXXXXX أو email@sana.com"
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pr-12 pl-4 focus:outline-none focus:border-blue-500/50 transition-all text-white"
+                />
               </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between px-1">
-                  <label className="text-sm font-medium text-slate-400">كلمة المرور</label>
-                  <button type="button" onClick={handleForgotPassword} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">نسيت الباسورد؟</button>
-                </div>
-                <div className="relative">
-                  <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                  <input 
-                    type={showPassword ? 'text' : 'password'} 
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pr-12 pl-12 focus:outline-none focus:border-blue-500/50 transition-all text-white"
-                  />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-
-              <button 
-                type="submit"
-                disabled={loading}
-                className="w-full bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-500/20 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'تسجيل الدخول'}
-              </button>
-            </form>
-          ) : (
-            <div className="space-y-6">
-              {!confirmationResult ? (
-                <form onSubmit={handleSendCode} className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-400 mr-1">رقم الهاتف</label>
-                    <div className="relative">
-                      <PhoneIcon className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                      <input 
-                        type="tel" 
-                        required
-                        value={phoneNumber}
-                        onChange={(e) => setPhoneNumber(e.target.value)}
-                        placeholder="07XXXXXXXX"
-                        className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pr-12 pl-4 focus:outline-none focus:border-blue-500/50 transition-all text-white text-left"
-                        dir="ltr"
-                      />
-                    </div>
-                    <p className="text-[10px] text-slate-500 mr-1">سيتم إرسال رمز تأكيد عبر SMS</p>
-                  </div>
-
-                  <button 
-                    type="submit"
-                    disabled={loading}
-                    className="w-full bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-500/20 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'إرسال الرمز'}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleVerifyCode} className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-400 mr-1">رمز التأكيد</label>
-                    <div className="relative">
-                      <Hash className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                      <input 
-                        type="text" 
-                        required
-                        value={verificationCode}
-                        onChange={(e) => setVerificationCode(e.target.value)}
-                        placeholder="XXXXXX"
-                        className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pr-12 pl-4 focus:outline-none focus:border-blue-500/50 transition-all text-white tracking-[1em] text-center font-black"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-3">
-                    <button 
-                      type="submit"
-                      disabled={loading}
-                      className="w-full bg-gradient-to-r from-emerald-600 to-emerald-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-emerald-500/20 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'تأكيد الرمز والدخول'}
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setConfirmationResult(null)}
-                      className="text-sm text-slate-500 hover:text-slate-300 transition-colors py-2"
-                    >
-                      تغيير رقم الهاتف
-                    </button>
-                  </div>
-                </form>
-              )}
             </div>
-          )}
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-sm font-medium text-slate-400">كلمة المرور</label>
+                <button type="button" onClick={handleForgotPassword} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">نسيت الباسورد؟</button>
+              </div>
+              <div className="relative">
+                <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                <input 
+                  type={showPassword ? 'text' : 'password'} 
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pr-12 pl-12 focus:outline-none focus:border-blue-500/50 transition-all text-white"
+                />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+            </div>
+
+            <button 
+              type="submit"
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-500/20 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'تسجيل الدخول'}
+            </button>
+          </form>
 
           {/* زر إنشاء حساب المدير */}
-          {loginMethod === 'email' && email === "ddoorrxxpp@gmail.com" && (
+          {identifier === "ddoorrxxpp@gmail.com" && (
             <button 
               type="button"
               onClick={bootstrapAdmin}

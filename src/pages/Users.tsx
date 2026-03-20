@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, updateDoc, Timestamp, getDocs } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { User, Shield, Mail, Plus, Search, UserCheck, UserX, Trash2, Edit2, Phone, MapPin, X, Camera, Activity, Clock } from 'lucide-react';
+import { collection, onSnapshot, query, orderBy, setDoc, deleteDoc, doc, updateDoc, Timestamp, getDocs } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, secondaryAuth } from '../firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { User, Shield, Mail, Plus, Search, UserCheck, UserX, Trash2, Edit2, Phone, MapPin, X, Camera, Activity, Clock, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { UserProfile, Branch, UserRole } from '../types';
 import { auth } from '../firebase';
@@ -16,6 +17,7 @@ export default function Users() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [addingUser, setAddingUser] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -79,12 +81,38 @@ export default function Users() {
   // إضافة مستخدم جديد
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.phone && !formData.email) {
+      alert('لازم تدخل رقم هاتف أو إيميل');
+      return;
+    }
+
+    setAddingUser(true);
     const path = 'users';
     try {
       const snapshot = await captureSnapshot();
       
-      await addDoc(collection(db, path), {
-        ...formData,
+      // 1. تحديد الإيميل المستخدم للـ Auth
+      let authEmail = formData.email;
+      if (!authEmail && formData.phone) {
+        const cleanPhone = formData.phone.trim().replace(/^0/, '');
+        authEmail = `${cleanPhone}@sana.com`;
+      }
+
+      if (!authEmail) throw new Error('لا يوجد بريد إلكتروني صالح');
+
+      // 2. إنشاء حساب في Firebase Auth (باستخدام التطبيق الثانوي)
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, authEmail, formData.password);
+      const newUser = userCredential.user;
+
+      // 3. حفظ البيانات في Firestore باستخدام الـ UID الجديد
+      await setDoc(doc(db, 'users', newUser.uid), {
+        uid: newUser.uid,
+        name: formData.name,
+        email: formData.email || authEmail,
+        phone: formData.phone,
+        role: formData.role,
+        password: formData.password, // نخزنه للعرض فقط (اختياري)
+        photoURL: formData.photoURL,
         status: 'active',
         createdAt: Timestamp.now(),
       });
@@ -103,8 +131,15 @@ export default function Users() {
 
       setShowAddModal(false);
       resetForm();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+    } catch (error: any) {
+      console.error(error);
+      if (error.code === 'auth/email-already-in-use') {
+        alert('هذا الرقم أو الإيميل مستخدم مسبقاً');
+      } else {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      }
+    } finally {
+      setAddingUser(false);
     }
   };
 
@@ -524,9 +559,10 @@ export default function Users() {
                 <div className="flex gap-4 pt-6">
                   <button 
                     type="submit"
-                    className="flex-1 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+                    disabled={addingUser}
+                    className="flex-1 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-500/20 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    {showAddModal ? 'إنشاء المستخدم' : 'حفظ التغييرات'}
+                    {addingUser ? <Loader2 className="w-5 h-5 animate-spin" /> : (showAddModal ? 'إنشاء المستخدم' : 'حفظ التغييرات')}
                   </button>
                   <button 
                     type="button"

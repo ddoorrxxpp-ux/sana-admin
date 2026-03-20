@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, updateDoc, Timestamp } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from '../firebase';
-import { Users, Phone, Plus, Search, Trash2, Power, PowerOff, Edit2, X, Mail, Lock, CheckSquare, Square } from 'lucide-react';
+import { collection, onSnapshot, query, orderBy, setDoc, deleteDoc, doc, updateDoc, Timestamp } from 'firebase/firestore';
+import { db, auth, handleFirestoreError, OperationType, secondaryAuth } from '../firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { Users, Phone, Plus, Search, Trash2, Power, PowerOff, Edit2, X, Mail, Lock, CheckSquare, Square, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChainOwner, Restaurant } from '../types';
 import { logActivity } from '../utils/logger';
@@ -12,6 +13,7 @@ export default function ChainOwners() {
   const [chainOwners, setChainOwners] = useState<ChainOwner[]>([]);
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [loading, setLoading] = useState(true);
+  const [addingOwner, setAddingOwner] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
   // حالات النوافذ المنبثقة
@@ -58,12 +60,35 @@ export default function ChainOwners() {
   // إضافة مسؤول سلسلة جديد
   const handleAddOwner = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.phone && !formData.email) {
+      alert('لازم تدخل رقم هاتف أو إيميل');
+      return;
+    }
+
+    setAddingOwner(true);
     const path = 'chain_owners';
     
     try {
       const snapshot = await captureSnapshot();
-      const docRef = await addDoc(collection(db, path), {
+      
+      // 1. تحديد الإيميل المستخدم للـ Auth
+      let authEmail = formData.email;
+      if (!authEmail && formData.phone) {
+        const cleanPhone = formData.phone.trim().replace(/^0/, '');
+        authEmail = `${cleanPhone}@sana.com`;
+      }
+
+      if (!authEmail) throw new Error('لا يوجد بريد إلكتروني صالح');
+
+      // 2. إنشاء حساب في Firebase Auth (باستخدام التطبيق الثانوي)
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, authEmail, formData.password);
+      const newUser = userCredential.user;
+
+      // 3. حفظ البيانات في Firestore باستخدام الـ UID الجديد
+      await setDoc(doc(db, 'chain_owners', newUser.uid), {
+        id: newUser.uid,
         ...formData,
+        email: formData.email || authEmail,
         status: 'active',
         createdAt: Timestamp.now(),
       });
@@ -71,7 +96,7 @@ export default function ChainOwners() {
       // ربط المطاعم بهذا المسؤول
       for (const rid of formData.restaurantIds) {
         await updateDoc(doc(db, 'restaurants', rid), {
-          ownerUid: docRef.id
+          ownerUid: newUser.uid
         });
       }
       
@@ -89,8 +114,15 @@ export default function ChainOwners() {
 
       setShowAddModal(false);
       setFormData({ name: '', email: '', phone: '', password: '', restaurantIds: [] });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+    } catch (error: any) {
+      console.error(error);
+      if (error.code === 'auth/email-already-in-use') {
+        alert('هذا الرقم أو الإيميل مستخدم مسبقاً');
+      } else {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      }
+    } finally {
+      setAddingOwner(false);
     }
   };
 
@@ -441,8 +473,12 @@ export default function ChainOwners() {
               </div>
             </div>
             <div className="flex gap-4 pt-6">
-              <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-blue-500/20">
-                إنشاء المسؤول
+              <button 
+                type="submit" 
+                disabled={addingOwner}
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {addingOwner ? <Loader2 className="w-5 h-5 animate-spin" /> : 'إنشاء المسؤول'}
               </button>
               <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 bg-white/5 hover:bg-white/10 text-white font-bold py-3.5 rounded-xl transition-all">
                 إلغاء

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, onSnapshot, query, orderBy, Timestamp, deleteDoc, doc, updateDoc, getDocs, setDoc } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType, secondaryAuth } from '../firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { Restaurant, Branch, RestaurantFeatures, UserProfile, UserRole } from '../types';
 import { logActivity } from '../utils/logger';
 import { useCamera } from '../components/CameraProvider';
@@ -29,7 +30,8 @@ import {
   Camera,
   Users,
   UserPlus,
-  UserMinus
+  UserMinus,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -38,6 +40,7 @@ export default function Restaurants() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [features, setFeatures] = useState<Record<string, RestaurantFeatures>>({});
   const [loading, setLoading] = useState(true);
+  const [addingEmployee, setAddingEmployee] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   
@@ -56,6 +59,8 @@ export default function Restaurants() {
   const [employeeFormData, setEmployeeFormData] = useState({
     name: '',
     role: 'cashier' as UserRole,
+    phone: '',
+    email: '',
     password: ''
   });
   
@@ -465,11 +470,33 @@ export default function Restaurants() {
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRestaurant) return;
+    if (!employeeFormData.phone && !employeeFormData.email) {
+      alert('لازم تدخل رقم هاتف أو إيميل');
+      return;
+    }
 
+    setAddingEmployee(true);
     try {
       const snapshot = await captureSnapshot();
-      await addDoc(collection(db, 'users'), {
+      
+      // 1. تحديد الإيميل المستخدم للـ Auth
+      let authEmail = employeeFormData.email;
+      if (!authEmail && employeeFormData.phone) {
+        const cleanPhone = employeeFormData.phone.trim().replace(/^0/, '');
+        authEmail = `${cleanPhone}@sana.com`;
+      }
+
+      if (!authEmail) throw new Error('لا يوجد بريد إلكتروني صالح');
+
+      // 2. إنشاء حساب في Firebase Auth (باستخدام التطبيق الثانوي)
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, authEmail, employeeFormData.password);
+      const newUser = userCredential.user;
+
+      // 3. حفظ البيانات في Firestore باستخدام الـ UID الجديد
+      await setDoc(doc(db, 'users', newUser.uid), {
+        uid: newUser.uid,
         ...employeeFormData,
+        email: employeeFormData.email || authEmail,
         branchId: selectedRestaurant.id,
         branchName: selectedRestaurant.name,
         status: 'active',
@@ -488,10 +515,15 @@ export default function Restaurants() {
         );
       }
 
-      setEmployeeFormData({ name: '', role: 'cashier', password: '' });
+      setEmployeeFormData({ name: '', role: 'cashier', phone: '', email: '', password: '' });
       openEmployeesModal(selectedRestaurant);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+      if (error.code === 'auth/email-already-in-use') {
+        alert('هذا الرقم أو الإيميل مستخدم مسبقاً');
+      }
+    } finally {
+      setAddingEmployee(false);
     }
   };
 
@@ -1089,6 +1121,20 @@ export default function Restaurants() {
                     className="bg-white/5 border border-white/10 rounded-xl py-2 px-4 text-sm focus:outline-none focus:border-blue-500/50"
                   />
                   <input 
+                    type="tel" 
+                    placeholder="رقم الهاتف"
+                    value={employeeFormData.phone}
+                    onChange={e => setEmployeeFormData({...employeeFormData, phone: e.target.value})}
+                    className="bg-white/5 border border-white/10 rounded-xl py-2 px-4 text-sm focus:outline-none focus:border-blue-500/50 font-mono"
+                  />
+                  <input 
+                    type="email" 
+                    placeholder="البريد الإلكتروني (اختياري)"
+                    value={employeeFormData.email}
+                    onChange={e => setEmployeeFormData({...employeeFormData, email: e.target.value})}
+                    className="bg-white/5 border border-white/10 rounded-xl py-2 px-4 text-sm focus:outline-none focus:border-blue-500/50"
+                  />
+                  <input 
                     type="text" 
                     placeholder="كلمة المرور"
                     required
@@ -1107,8 +1153,14 @@ export default function Restaurants() {
                   <option value="driver" className="bg-slate-900">مندوب توصيل</option>
                   <option value="waiter" className="bg-slate-900">ويتر (نادل)</option>
                   <option value="tables" className="bg-slate-900">مسؤول طاولات</option>
+                  <option value="branch_manager" className="bg-slate-900">مدير فرع</option>
                 </select>
-                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-50 text-white py-2 rounded-xl text-sm font-bold transition-all">
+                <button 
+                  type="submit" 
+                  disabled={addingEmployee}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {addingEmployee ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
                   إضافة الموظف
                 </button>
               </div>
