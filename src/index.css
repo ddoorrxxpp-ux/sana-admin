@@ -1,0 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Cairo", ui-sans-serif, system-ui, sans-serif;
+  --color-brand-primary: #007bff;
+  --color-brand-secondary: #f27d26;
+  --color-bg-dark: #050505;
+  --color-card-bg: rgba(15, 23, 42, 0.8);
+}
+
+body {
+  @apply bg-[#050505] text-white font-sans antialiased;
+  direction: rtl;
+}
+
+.futuristic-card {
+  @apply bg-slate-900/50 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.4) 100%);
+}
+
+.neon-border {
+  @apply border-brand-primary/50 shadow-[0_0_15px_rgba(0,123,255,0.3)];
+}
+
+.neon-text-blue {
+  @apply text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.5)];
+}
+
+.neon-text-orange {
+  @apply text-orange-400 drop-shadow-[0_0_8px_rgba(251,146,60,0.5)];
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full hover:bg-white/20;
+}

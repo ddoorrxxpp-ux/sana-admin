@@ -1,0 +1,107 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "ddoorrxxpp@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') in ['super_admin', 'executive_director', 'subscription_manager', 'restaurant_monitor', 'reporter'])
+      );
+    }
+    
+    function isOwner(restaurantId) {
+      return isAuthenticated() && (
+        isAdmin() || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('restaurantId', '') == restaurantId
+        )
+      );
+    }
+
+    // User Rules
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (
+        (request.auth.uid == userId && request.auth.token.email == "ddoorrxxpp@gmail.com") || 
+        isAdmin()
+      );
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
+    }
+
+    // Restaurant Rules
+    match /restaurants/{restaurantId} {
+      allow read: if true; // Public for menu access
+      allow write: if isAdmin();
+    }
+
+    // Branch Rules (Top-level as used in the app)
+    match /branches/{branchId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || (isAuthenticated() && isOwner(request.resource.data.restaurantId));
+    }
+
+    // Subscription Rules
+    match /subscriptions/{subId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Activity Log Rules
+    match /activity_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if true; 
+      // Allow update for idempotency (retries) - only if data is identical
+      allow update: if (isAuthenticated() && isAdmin()) || request.resource.data == resource.data;
+      allow delete: if isAdmin();
+    }
+
+    // Dashboard Stats (Virtual collection for logging/errors)
+    match /dashboard/{docId} {
+      allow read: if isAdmin();
+    }
+
+    // Settings Rules
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Driver Rules
+    match /drivers/{driverId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Table Rules
+    match /tables/{tableId} {
+      allow read: if true; // Public for QR menu
+      allow write: if isAdmin() || (isAuthenticated() && isOwner(resource.data.restaurantId));
+    }
+
+    // Restaurant Features Rules
+    match /restaurant_features/{featureId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Chain Owners Rules
+    match /chain_owners/{ownerId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Order Rules
+    match /orders/{orderId} {
+      allow read: if true; // Customers can track their orders
+      allow create: if true; // Customers can place orders
+      allow update, delete: if isAuthenticated() && (isAdmin() || isOwner(resource.data.restaurantId));
+    }
+  }
+}

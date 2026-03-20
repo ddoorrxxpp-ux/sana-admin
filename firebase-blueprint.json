@@ -1,0 +1,173 @@
+{
+  "entities": {
+    "restaurant": {
+      "title": "Restaurant",
+      "description": "Main restaurant chain entity",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Restaurant name" },
+        "logo": { "type": "string", "description": "Logo URL" },
+        "phone": { "type": "string", "description": "Contact phone" },
+        "colors": { "type": "object", "description": "UI theme colors" },
+        "status": { "type": "string", "enum": ["active", "suspended", "expired"], "description": "Current status" },
+        "ownerUid": { "type": "string", "description": "UID of the chain owner" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerUid"]
+    },
+    "branch": {
+      "title": "Branch",
+      "description": "Specific branch of a restaurant",
+      "type": "object",
+      "properties": {
+        "restaurantId": { "type": "string", "description": "Parent restaurant ID" },
+        "name": { "type": "string", "description": "Branch name" },
+        "address": { "type": "string", "description": "Physical address" },
+        "phone": { "type": "string", "description": "Branch phone" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["restaurantId", "name"]
+    },
+    "subscription": {
+      "title": "Subscription",
+      "description": "Subscription details for a restaurant",
+      "type": "object",
+      "properties": {
+        "restaurantId": { "type": "string", "description": "Restaurant ID" },
+        "plan": { "type": "string", "enum": ["monthly", "quarterly", "yearly"], "description": "Plan type" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "expired", "pending_payment"] }
+      },
+      "required": ["restaurantId", "plan", "endDate"]
+    },
+    "user": {
+      "title": "User",
+      "description": "System user (Admin, Owner, Manager, Cashier)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "restaurantId": { "type": "string", "description": "Optional: linked restaurant" },
+        "branchId": { "type": "string", "description": "Optional: linked branch" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_admin", "executive_director", "subscription_manager", "restaurant_monitor", "reporter", "chain_owner", "branch_manager", "cashier", "kitchen"] },
+        "status": { "type": "string", "enum": ["active", "inactive"] }
+      },
+      "required": ["uid", "role", "email"]
+    },
+    "chain_owner": {
+      "title": "Chain Owner",
+      "description": "Owner of multiple restaurant branches",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "password": { "type": "string" },
+        "restaurantIds": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "restaurantIds"]
+    },
+    "order": {
+      "title": "Order",
+      "description": "Customer order",
+      "type": "object",
+      "properties": {
+        "restaurantId": { "type": "string" },
+        "branchId": { "type": "string" },
+        "items": { "type": "array", "items": { "type": "object" } },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "preparing", "ready", "delivered", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "admin": {
+      "title": "Admin",
+      "description": "Super admin account for platform management",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "lastLogin": { "type": "string", "format": "date-time" },
+        "loginAttempts": { "type": "integer" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["email", "active"]
+    },
+    "activity_log": {
+      "title": "Activity Log",
+      "description": "Log of system actions",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "type": { "type": "string", "enum": ["create", "update", "delete", "login"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "ip": { "type": "string" },
+        "device": { "type": "string" }
+      }
+    },
+    "setting": {
+      "title": "Setting",
+      "description": "Global system settings",
+      "type": "object",
+      "properties": {
+        "workingHours": { "type": "object" },
+        "commissionRate": { "type": "number" },
+        "features": {
+          "type": "object",
+          "properties": {
+            "pos": { "type": "boolean" },
+            "qrTables": { "type": "boolean" },
+            "printing": { "type": "boolean" }
+          }
+        },
+        "emailConfig": { "type": "object" }
+      }
+    }
+  },
+  "firestore": {
+    "/restaurants/{restaurantId}": {
+      "schema": "restaurant",
+      "description": "Restaurant details"
+    },
+    "/restaurants/{restaurantId}/branches/{branchId}": {
+      "schema": "branch",
+      "description": "Branch details"
+    },
+    "/subscriptions/{subId}": {
+      "schema": "subscription",
+      "description": "Subscription records"
+    },
+    "/users/{userId}": {
+      "schema": "user",
+      "description": "User profiles and roles"
+    },
+    "/chain_owners/{ownerId}": {
+      "schema": "chain_owner",
+      "description": "Chain owner records"
+    },
+    "/orders/{orderId}": {
+      "schema": "order",
+      "description": "Global orders collection"
+    },
+    "/admins/{adminId}": {
+      "schema": "admin",
+      "description": "Admin accounts"
+    },
+    "/activity_logs/{logId}": {
+      "schema": "activity_log",
+      "description": "System activity logs"
+    },
+    "/settings/{settingId}": {
+      "schema": "setting",
+      "description": "Global settings"
+    }
+  }
+}
